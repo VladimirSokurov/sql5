@@ -12,28 +12,20 @@ def get_client_id(cursor, name: str) -> int:
     return cur.fetchone()[0]
 
 
-# так не работает:
-# def get_phone_id(cursor, number: int) -> int:
-#     cursor.execute("""
-#     SELECT id FROM Numbers WHERE number=%d;
-#     """, (number,))
-#     return cur.fetchone()[0]
-
-# так работает:
 def get_phone_id(cursor, number: int) -> int:
-    cursor.execute(f"""
-    SELECT id FROM Numbers WHERE number={number};
-    """)
+    cursor.execute("""
+    SELECT id FROM Numbers WHERE number=%s;
+    """, (number,))
     return cur.fetchone()[0]
 
 
-def create_db(conn):
+def drop_tables(conn):
     cur.execute("""
-    DROP TABLE ClientsNumbers;
-    DROP TABLE Clients;
-    DROP TABLE Numbers;        
-    """)
+       DROP TABLE Numbers, Clients CASCADE;    
+       """)
 
+
+def create_db(conn):
     cur.execute("""
         CREATE TABLE IF NOT EXISTS Clients(
             id SERIAL PRIMARY KEY,
@@ -46,18 +38,10 @@ def create_db(conn):
     cur.execute("""
         CREATE TABLE IF NOT EXISTS Numbers(
             id SERIAL PRIMARY KEY,
-            number BIGINT NOT NULL
+            number BIGINT NOT NULL,
+            client_id integer NOT NULL references Clients(id)
             );
             """)
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS ClientsNumbers(
-            id SERIAL PRIMARY KEY,
-            client_id integer not null references Clients(id),
-            number_id integer not null references Numbers(id)
-            );
-            """)
-    conn.commit()
 
 
 def add_client(conn, first_name, last_name, email, phones=None):
@@ -70,50 +54,28 @@ def add_client(conn, first_name, last_name, email, phones=None):
         if type(phones) != int:
             for number in phones:
                 cur.execute("""
-                    INSERT INTO Numbers(number) VALUES
-                        (%d);
-                        """ % number)
-
-                number_id = get_phone_id(cursor=cur, number=number)
-
-                cur.execute("""
-                    INSERT INTO ClientsNumbers(client_id, number_id) VALUES
-                        (%d, %d);
-                        """ % (client_id, number_id))
+                    INSERT INTO Numbers(number, client_id) VALUES
+                        (%d, %s);
+                        """ % (number, client_id))
         else:
             cur.execute("""
-                INSERT INTO Numbers(number) VALUES
-                    (%d);
-                    """ % phones)
-            number_id = get_phone_id(cursor=cur, number=phones)
-            cur.execute("""
-                INSERT INTO ClientsNumbers(client_id, number_id) VALUES
-                    (%d, %d);
-                    """ % (client_id, number_id))
+                INSERT INTO Numbers(number, client_id) VALUES
+                    (%d, %s);
+                    """ % (phones, client_id))
 
 
 def add_phone(conn, client_id, phone):
     if type(phone) != int:
         for number in phone:
             cur.execute("""
-                  INSERT INTO Numbers(number) VALUES
-                      (%d);
-                      """ % number)
-            number_id = get_phone_id(cursor=cur, number=number)
-            cur.execute("""
-                  INSERT INTO ClientsNumbers(client_id, number_id) VALUES
-                      (%d, %d);
-                      """ % (client_id, number_id))
+                  INSERT INTO Numbers(number, client_id) VALUES
+                      (%d, %s);
+                      """ % (number, client_id))
     else:
         cur.execute("""
-                         INSERT INTO Numbers(number) VALUES
-                             (%d);
-                             """ % phone)
-        number_id = get_phone_id(cursor=cur, number=phone)
-        cur.execute("""
-                         INSERT INTO ClientsNumbers(client_id, number_id) VALUES
-                             (%d, %d);
-                             """ % (client_id, number_id))
+                         INSERT INTO Numbers(number, client_id) VALUES
+                             (%d, %s);
+                             """ % (phone, client_id))
 
 
 def change_client(conn, client_id, first_name=None, last_name=None, email=None, phones=None):
@@ -131,61 +93,26 @@ def change_client(conn, client_id, first_name=None, last_name=None, email=None, 
         """, (email, client_id))
     if phones:
         cur.execute("""
-               SELECT n.id FROM Numbers n
-               LEFT JOIN ClientsNumbers cn ON n.id = cn.number_id
-               WHERE cn.client_id = %s
-               ORDER BY n.id;
-               """, (client_id,))
-        number_id_ = cur.fetchall()
-        cur.execute("""
-               DELETE FROM ClientsNumbers WHERE client_id=%s;
-               """, (client_id,))
-        for id in number_id_:
-            cur.execute("""
-                   DELETE FROM Numbers WHERE id=%s;
-                   """, (id[0],))
+                DELETE FROM Numbers WHERE client_id=%s;
+                """, (client_id,))
 
         add_phone(conn, client_id, phones)
 
 
 def delete_phone(conn, client_id, phone):
     cur.execute("""
-           SELECT n.id FROM Numbers n
-           LEFT JOIN ClientsNumbers cn ON n.id = cn.number_id
-           WHERE cn.client_id = %s and n.number = %s
-           ORDER BY n.id;
-           """, (client_id, phone))
-    number_id_ = cur.fetchall()
-    cur.execute("""
-           DELETE FROM ClientsNumbers WHERE number_id=%s;
-           """, (number_id_[0],))
-
-    for id in number_id_:
-        cur.execute("""
-               DELETE FROM Numbers WHERE id=%s;
-               """, (id[0],))
+            DELETE FROM Numbers WHERE client_id=%s and number=%s;
+            """, (client_id, phone))
 
 
 def delete_client(conn, client_id):
     cur.execute("""
-           SELECT n.id FROM Numbers n
-           LEFT JOIN ClientsNumbers cn ON n.id = cn.number_id
-           WHERE cn.client_id = %s
-           ORDER BY n.id;
-           """, (client_id,))
-    number_id_ = cur.fetchall()
-    cur.execute("""
-           DELETE FROM ClientsNumbers WHERE client_id=%s;
+           DELETE FROM Numbers WHERE client_id=%s;
            """, (client_id,))
 
-    for id in number_id_:
-        cur.execute("""
-               DELETE FROM Numbers WHERE id=%s;
-               """, (id[0],))
-
     cur.execute("""
-                  DELETE FROM Clients WHERE id=%s;
-                  """, (client_id,))
+          DELETE FROM Clients WHERE id=%s;
+          """, (client_id,))
 
 
 def find_client(conn, first_name=None, last_name=None, email=None, phone=None):
@@ -229,10 +156,8 @@ def find_client(conn, first_name=None, last_name=None, email=None, phone=None):
 
         client_id = get_client_id(cur, name=name_)
         cur.execute("""
-            SELECT n.number FROM Numbers n
-            LEFT JOIN ClientsNumbers cn ON n.id = cn.number_id
-            WHERE client_id=%s
-            GROUP BY n.number;
+            SELECT number FROM Numbers 
+            WHERE client_id=%s;
                 """, (client_id,))
         result2 = cur.fetchall()
         if len(result2) > 1:
@@ -245,10 +170,8 @@ def find_client(conn, first_name=None, last_name=None, email=None, phone=None):
     else:
         cur.execute("""
                        SELECT * FROM Clients
-                       WHERE id=(
-                       SELECT client_id from ClientsNumbers
-                       WHERE number_id=(SELECT id from Numbers
-                       WHERE number=%s));
+                       WHERE id=(SELECT client_id from Numbers
+                       WHERE number=%s);
                            """, (phone,))
         result = cur.fetchall()
         name_ = result[0][1]
@@ -256,25 +179,20 @@ def find_client(conn, first_name=None, last_name=None, email=None, phone=None):
         email_ = result[0][3]
 
         cur.execute("""                              
-                      SELECT number_id FROM ClientsNumbers
-                      WHERE client_id=(
-                      SELECT client_id FROM ClientsNumbers
-                      WHERE number_id=(SELECT id from Numbers
-                      WHERE number=%s));
+                      SELECT id FROM Numbers
+                      WHERE number=%s;
                           """, (phone,))
         result2 = cur.fetchall()
 
         numbers_list = []
         for i in result2:
             cur.execute("""
-                    SELECT n.number FROM Numbers n
-                    LEFT JOIN ClientsNumbers cn ON n.id = cn.number_id
-                    WHERE cn.number_id = %s;
+                    SELECT number FROM Numbers 
+                    WHERE id = %s;
                     """, (i[0],))
             result3 = cur.fetchall()
             if len(result2) > 1:
                 numbers_list.append(result3[0][0])
-
             else:
                 phone_ = result3[0][0]
                 client_list.append(phone_)
@@ -284,50 +202,46 @@ def find_client(conn, first_name=None, last_name=None, email=None, phone=None):
     client_list.append(name_)
     client_list.append(last_name_)
     client_list.append(email_)
-    change_id = client_list.pop(0)
-    client_list.append(change_id)
+    changed_id = client_list.pop(0)
+    client_list.append(changed_id)
 
     return client_list
 
 
 if __name__ == '__main__':
-    conn = psycopg2.connect(database='sql_hw5', user='postgres', password='r3l0ATprogef3w_+')
-    with conn.cursor() as cur:
-        create_db(conn)
+    with psycopg2.connect(database='sql_hw5', user='postgres', password='r3l0ATprogef3w_+') as conn:
+        with conn.cursor() as cur:
+            drop_tables(conn)
+            create_db(conn)
 
-        add_client(conn, first_name='Егор', last_name='Субботин', email='subbotin@yandex.ru', phones=phones_list_1)
-        add_client(conn, first_name='Александр', last_name='Захаров', email='zaharov@yandex.ru', phones=89524633476)
-        add_client(conn, first_name='Василий', last_name='Морозов', email='morozov@yandex.ru')
+            add_client(conn, first_name='Егор', last_name='Субботин', email='subbotin@yandex.ru', phones=phones_list_1)
+            add_client(conn, first_name='Александр', last_name='Захаров', email='zaharov@yandex.ru', phones=89524633476)
+            add_client(conn, first_name='Василий', last_name='Морозов', email='morozov@yandex.ru')
 
-        add_phone(conn, client_id=2, phone=12344633476)
-        add_phone(conn, client_id=3, phone=phones_list_2)
+            add_phone(conn, client_id=2, phone=12344633476)
+            add_phone(conn, client_id=3, phone=phones_list_2)
 
-        change_client(conn, client_id=1, first_name='неЕгор', phones=phones_list_3)
-        change_client(conn, client_id=2, last_name='неЗахаров', email='NEzaharov@yandex.ru')
+            change_client(conn, client_id=1, first_name='неЕгор', phones=phones_list_3)
+            change_client(conn, client_id=2, last_name='неЗахаров', email='NEzaharov@yandex.ru')
 
-        delete_phone(conn, client_id=2, phone=89524633476)
+            delete_phone(conn, client_id=2, phone=89524633476)
 
-        delete_client(conn, client_id=1)
+            delete_client(conn, client_id=1)
 
-        print(find_client(conn, first_name='Александр'))
-        print(find_client(conn, last_name='Морозов'))
-        print(find_client(conn, email='morozov@yandex.ru'))
-        print(find_client(conn, phone=123433333678901))
+            print(find_client(conn, first_name='Александр'))
+            print(find_client(conn, last_name='Морозов'))
+            print(find_client(conn, email='morozov@yandex.ru'))
+            print(find_client(conn, phone=123433333678901))
 
-        cur.execute("""
-            SELECT * from Clients;
-                """)
-        print(f'Clients: {cur.fetchall()}')
+            cur.execute("""
+                SELECT * from Clients;
+                    """)
+            print(f'Clients: {cur.fetchall()}')
 
-        cur.execute("""
-            SELECT * from Numbers;
-                """)
-        print(f'Numbers: {cur.fetchall()}')
-
-        cur.execute("""
-            SELECT * from ClientsNumbers;
-                """)
-        print(f'ClientsNumbers: {cur.fetchall()}')
+            cur.execute("""
+                SELECT * from Numbers;
+                    """)
+            print(f'Numbers: {cur.fetchall()}')
 
     cur.close()
     conn.close()
